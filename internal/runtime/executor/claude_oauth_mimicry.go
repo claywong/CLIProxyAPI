@@ -55,6 +55,22 @@ func claudeOAuthMimicryTTL(cfg *config.Config) time.Duration {
 	return d
 }
 
+// claudeOAuthDeviceIDDir resolves the directory used to persist per-account
+// device_id files from the configured auth directory. Returns "" when the auth
+// dir cannot be resolved, in which case the in-memory fallback device_id is used.
+func claudeOAuthDeviceIDDir(cfg *config.Config) string {
+	authDir := ""
+	if cfg != nil {
+		authDir = cfg.AuthDir
+	}
+	resolved, err := util.ResolveAuthDir(authDir)
+	if err != nil {
+		log.Warnf("claude oauth mimicry: resolve auth dir failed: %v", err)
+		return ""
+	}
+	return resolved
+}
+
 // getClaudeOAuthMimicryStore returns the process-wide in-memory fingerprint
 // store. The TTL is captured on first use; subsequent calls reuse the same
 // store regardless of later config changes to keep cached entries stable.
@@ -62,6 +78,7 @@ func getClaudeOAuthMimicryStore(cfg *config.Config) helps.FingerprintStore {
 	oauthMimicryStoreOnce.Do(func() {
 		oauthMimicryStoreTTL = claudeOAuthMimicryTTL(cfg)
 		oauthMimicryStore = helps.NewMemoryFingerprintStore(oauthMimicryStoreTTL)
+		helps.ConfigureDeviceIDDir(claudeOAuthDeviceIDDir(cfg))
 	})
 	return oauthMimicryStore
 }

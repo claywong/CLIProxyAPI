@@ -4,11 +4,92 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
+	log "github.com/sirupsen/logrus"
 )
+
+// deviceIDFileSuffix is appended to the sanitized account ID to form each
+// account's device_id file name (e.g. "claude-foo@bar.com.device_id").
+const deviceIDFileSuffix = ".device_id"
+
+var (
+	deviceIDMu    sync.Mutex
+	deviceIDDir   string                // persistence directory; empty means fallback-only
+	deviceIDCache = map[string]string{} // per-account resolved device_id cache
+)
+
+// ConfigureDeviceIDDir sets the directory used to persist per-account device_id
+// files. A new directory clears the resolution cache so values are re-read.
+// Safe for concurrent use.
+func ConfigureDeviceIDDir(dir string) {
+	deviceIDMu.Lock()
+	defer deviceIDMu.Unlock()
+	if dir == "" || dir == deviceIDDir {
+		return
+	}
+	deviceIDDir = dir
+	deviceIDCache = map[string]string{}
+}
+
+// deviceIDFileName maps an account ID to a flat, filesystem-safe file name. The
+// account ID is the auth record's relative path (e.g. "claude-foo@bar.com.json");
+// the trailing ".json" is dropped and path separators / other unsafe characters
+// are replaced with underscores so each account maps to a single flat file.
+func deviceIDFileName(accountID string) string {
+	base := strings.TrimSuffix(accountID, ".json")
+	safe := strings.Map(func(r rune) rune {
+		switch r {
+		case '/', '\\', ':':
+			return '_'
+		default:
+			return r
+		}
+	}, base)
+	return safe + deviceIDFileSuffix
+}
+
+// resolveDeviceID returns the persistent device_id for a single account. Each
+// account maps to its own file under the configured directory. The result is
+// read once and cached. Existing accounts were seeded with a fixed device_id
+// out-of-band; any account without a file here is treated as new and gets a
+// freshly generated random device_id, which is then persisted with no
+// expiration. When no directory is configured, or accountID is empty, a random
+// device_id is returned without touching disk.
+func resolveDeviceID(accountID string) string {
+	deviceIDMu.Lock()
+	defer deviceIDMu.Unlock()
+	if v, ok := deviceIDCache[accountID]; ok {
+		return v
+	}
+	if deviceIDDir == "" || accountID == "" {
+		val := GenerateDeviceID()
+		deviceIDCache[accountID] = val
+		return val
+	}
+	path := filepath.Join(deviceIDDir, deviceIDFileName(accountID))
+	if data, err := os.ReadFile(path); err == nil {
+		if v := strings.TrimSpace(string(data)); v != "" {
+			deviceIDCache[accountID] = v
+			return v
+		}
+	}
+	// No file for this account: treat it as new, generate a random device_id
+	// and persist it for next time.
+	val := GenerateDeviceID()
+	if err := os.MkdirAll(deviceIDDir, 0o755); err != nil {
+		log.Warnf("claude oauth mimicry: create device_id dir failed: %v", err)
+	} else if err := os.WriteFile(path, []byte(val), 0o600); err != nil {
+		log.Warnf("claude oauth mimicry: persist device_id failed: %v", err)
+	}
+	deviceIDCache[accountID] = val
+	return val
+}
 
 // OAuthFingerprint holds the per-account Claude Code CLI identity used by the
 // OAuth mimicry pipeline. AccountID and AccountUUID are sourced from the auth
@@ -145,7 +226,7 @@ func GetOrCreateOAuthFingerprint(
 		fp := FingerprintTemplate
 		fp.AccountID = ""
 		fp.AccountUUID = extractAccountUUID(auth)
-		fp.DeviceID = GenerateDeviceID()
+		fp.DeviceID = resolveDeviceID(accountID)
 		fp.CreatedAt = time.Now()
 		fp.UpdatedAt = fp.CreatedAt
 		return &fp, nil
@@ -172,7 +253,7 @@ func GetOrCreateOAuthFingerprint(
 	fp := FingerprintTemplate
 	fp.AccountID = accountID
 	fp.AccountUUID = accountUUID
-	fp.DeviceID = GenerateDeviceID()
+	fp.DeviceID = resolveDeviceID(accountID)
 	fp.CreatedAt = time.Now()
 	fp.UpdatedAt = fp.CreatedAt
 	if store != nil {
