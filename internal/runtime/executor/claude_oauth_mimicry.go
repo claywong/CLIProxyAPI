@@ -2,12 +2,16 @@ package executor
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
 )
@@ -104,4 +108,46 @@ func stampClaudeOAuthHeaders(req *http.Request, fp *helps.OAuthFingerprint, body
 	}
 	helps.ApplyOAuthMimicryHeaders(req, fp, isStream)
 	helps.SyncOAuthSessionHeader(req, body)
+}
+
+// logClaudeOAuthMimicryWire dumps the final URL, headers (sensitive values
+// masked) and body that will be sent upstream after the mimicry rewrite. Runs
+// only when the global log level is debug or lower and when mimicry actually
+// produced a fingerprint, so the hot path stays free of work in normal runs.
+func logClaudeOAuthMimicryWire(ctx context.Context, url string, req *http.Request, body []byte, fp *helps.OAuthFingerprint, isStream bool) {
+	if fp == nil || req == nil {
+		return
+	}
+	if !log.IsLevelEnabled(log.DebugLevel) {
+		return
+	}
+
+	headerLines := make([]string, 0, len(req.Header))
+	keys := make([]string, 0, len(req.Header))
+	for k := range req.Header {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		for _, v := range req.Header[k] {
+			headerLines = append(headerLines, fmt.Sprintf("%s: %s", k, util.MaskSensitiveHeaderValue(k, v)))
+		}
+	}
+
+	devicePrefix := fp.DeviceID
+	if len(devicePrefix) > 8 {
+		devicePrefix = devicePrefix[:8]
+	}
+
+	helps.LogWithRequestID(ctx).WithFields(log.Fields{
+		"component":        "claude_oauth_mimicry",
+		"method":           req.Method,
+		"url":              url,
+		"stream":           isStream,
+		"account_uuid":     fp.AccountUUID,
+		"device_id_prefix": devicePrefix,
+		"user_agent":       fp.UserAgent,
+		"body_bytes":       len(body),
+	}).Debugf("claude oauth mimicry wire dump:\nheaders:\n  %s\nbody:\n%s",
+		strings.Join(headerLines, "\n  "), string(body))
 }

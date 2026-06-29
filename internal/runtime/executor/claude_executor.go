@@ -296,6 +296,7 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 	// Stamp the fingerprint header template on top of applyClaudeHeaders' output
 	// so client-supplied identity headers never leak through on the OAuth path.
 	stampClaudeOAuthHeaders(httpReq, oauthMimicryFP, bodyForUpstream, false)
+	logClaudeOAuthMimicryWire(ctx, url, httpReq, bodyForUpstream, oauthMimicryFP, false)
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
 		authID = auth.ID
@@ -490,6 +491,7 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 	// Stamp the fingerprint header template after the legacy path runs so the
 	// stream request matches the byte-for-byte CLI signature.
 	stampClaudeOAuthHeaders(httpReq, oauthMimicryFP, bodyForUpstream, true)
+	logClaudeOAuthMimicryWire(ctx, url, httpReq, bodyForUpstream, oauthMimicryFP, true)
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
 		authID = auth.ID
@@ -741,6 +743,7 @@ func (e *ClaudeExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Aut
 		return cliproxyexecutor.Response{}, errHeaders
 	}
 	stampClaudeOAuthHeaders(httpReq, oauthMimicryFP, body, false)
+	logClaudeOAuthMimicryWire(ctx, url, httpReq, body, oauthMimicryFP, false)
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
 		authID = auth.ID
