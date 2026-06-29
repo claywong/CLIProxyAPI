@@ -141,6 +141,26 @@ transient-error-cooldown-seconds: 0
 # "auto" behavior (cloak only non-Claude-Code clients).
 disable-claude-cloak-mode: false
 
+# Claude OAuth identity mimicry: when enabled (default true), every request that
+# uses a Claude OAuth credential is rewritten with a stable per-account Claude
+# Code CLI fingerprint. Specifically:
+#   * device_id, X-Stainless-* and User-Agent are derived from a cached template
+#     keyed by auth.ID and persisted in memory only;
+#   * metadata.user_id is rebuilt as {device_id, account_uuid, session_id},
+#     where session_id is deterministically derived from SHA256(auth.ID :: input);
+#   * anthropic-beta is overridden with the template list (matches the CLI build
+#     pinned by claude-oauth-mimicry's User-Agent), client-supplied headers are
+#     not forwarded;
+#   * x-client-request-id is regenerated per request; X-Claude-Code-Session-Id
+#     is synced from metadata.user_id.session_id.
+# Disabling this falls back to the legacy injectFakeUserID + EnsureHeader path.
+claude-oauth-mimicry:
+  enabled: true
+  # In-memory cache TTL for per-account fingerprints. Each hit refreshes the TTL.
+  # Restarts wipe the cache; on the next request a fresh device_id is generated
+  # for that account.
+  fingerprint-cache-ttl: "168h"
+
 # disable-image-generation supports: false (default), true, "chat", or "passthrough".
 # - true: disable image_generation everywhere (also returns 404 for /v1/images/generations and /v1/images/edits).
 # - "chat": disable image_generation injection on non-images endpoints, but keep /v1/images/generations and /v1/images/edits enabled.

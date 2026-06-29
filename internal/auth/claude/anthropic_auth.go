@@ -305,6 +305,7 @@ func (o *ClaudeAuth) ExchangeCodeForTokens(ctx context.Context, code, state stri
 		RefreshToken: tokenResp.RefreshToken,
 		Email:        tokenResp.Account.EmailAddress,
 		Expire:       time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second).Format(time.RFC3339),
+		AccountUUID:  tokenResp.Account.UUID,
 	}
 
 	// Create auth bundle
@@ -422,6 +423,7 @@ func (o *ClaudeAuth) refreshTokensSingleFlight(ctx context.Context, refreshToken
 		RefreshToken: tokenResp.RefreshToken,
 		Email:        tokenResp.Account.EmailAddress,
 		Expire:       time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second).Format(time.RFC3339),
+		AccountUUID:  tokenResp.Account.UUID,
 	}, nil
 }
 

@@ -271,6 +271,13 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 		bodyForUpstream, oauthToolNamesReverseMap = prepareClaudeOAuthToolNamesForUpstream(bodyForUpstream, claudeToolPrefix, auth.ToolPrefixDisabled())
 	}
 	bodyForUpstream = sanitizeClaudeMessagesForClaudeUpstreamWithDebug(ctx, bodyForUpstream, baseModel)
+	// Apply Claude OAuth identity mimicry to the request body before signing:
+	// metadata.user_id is rebuilt against the account-pinned fingerprint so the
+	// downstream CCH signature is computed over the final wire body.
+	var oauthMimicryFP *helps.OAuthFingerprint
+	if oauthToken {
+		bodyForUpstream, oauthMimicryFP = rewriteClaudeOAuthBody(ctx, e.cfg, auth, apiKey, bodyForUpstream)
+	}
 	// Enable cch signing by default for OAuth tokens (not just experimental flag).
 	// Claude Code always computes cch; missing or invalid cch is a detectable fingerprint.
 	if oauthToken || experimentalCCHSigningEnabled(e.cfg, auth) {
@@ -286,6 +293,9 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 	if errHeaders := applyClaudeHeaders(httpReq, auth, apiKey, false, extraBetas, e.cfg); errHeaders != nil {
 		return resp, errHeaders
 	}
+	// Stamp the fingerprint header template on top of applyClaudeHeaders' output
+	// so client-supplied identity headers never leak through on the OAuth path.
+	stampClaudeOAuthHeaders(httpReq, oauthMimicryFP, bodyForUpstream, false)
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
 		authID = auth.ID
@@ -458,6 +468,11 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 		bodyForUpstream, oauthToolNamesReverseMap = prepareClaudeOAuthToolNamesForUpstream(bodyForUpstream, claudeToolPrefix, auth.ToolPrefixDisabled())
 	}
 	bodyForUpstream = sanitizeClaudeMessagesForClaudeUpstreamWithDebug(ctx, bodyForUpstream, baseModel)
+	// Apply Claude OAuth identity mimicry to the request body before signing.
+	var oauthMimicryFP *helps.OAuthFingerprint
+	if oauthToken {
+		bodyForUpstream, oauthMimicryFP = rewriteClaudeOAuthBody(ctx, e.cfg, auth, apiKey, bodyForUpstream)
+	}
 	// Enable cch signing by default for OAuth tokens (not just experimental flag).
 	if oauthToken || experimentalCCHSigningEnabled(e.cfg, auth) {
 		bodyForUpstream = signAnthropicMessagesBody(bodyForUpstream)
@@ -472,6 +487,9 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 	if errHeaders := applyClaudeHeaders(httpReq, auth, apiKey, true, extraBetas, e.cfg); errHeaders != nil {
 		return nil, errHeaders
 	}
+	// Stamp the fingerprint header template after the legacy path runs so the
+	// stream request matches the byte-for-byte CLI signature.
+	stampClaudeOAuthHeaders(httpReq, oauthMimicryFP, bodyForUpstream, true)
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
 		authID = auth.ID
@@ -702,10 +720,17 @@ func (e *ClaudeExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Aut
 	// Extract betas from body and convert to header (for count_tokens too)
 	var extraBetas []string
 	extraBetas, body = extractAndRemoveBetas(body)
-	if isClaudeOAuthToken(apiKey) {
+	oauthToken := isClaudeOAuthToken(apiKey)
+	if oauthToken {
 		body, _ = prepareClaudeOAuthToolNamesForUpstream(body, claudeToolPrefix, auth.ToolPrefixDisabled())
 	}
 	body = sanitizeClaudeMessagesForClaudeUpstreamWithDebug(ctx, body, baseModel)
+	// Apply Claude OAuth identity mimicry to the request body (count_tokens does
+	// not sign the body, so ordering relative to signing is moot here).
+	var oauthMimicryFP *helps.OAuthFingerprint
+	if oauthToken {
+		body, oauthMimicryFP = rewriteClaudeOAuthBody(ctx, e.cfg, auth, apiKey, body)
+	}
 
 	url := fmt.Sprintf("%s/v1/messages/count_tokens?beta=true", baseURL)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
@@ -715,6 +740,7 @@ func (e *ClaudeExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Aut
 	if errHeaders := applyClaudeHeaders(httpReq, auth, apiKey, false, extraBetas, e.cfg); errHeaders != nil {
 		return cliproxyexecutor.Response{}, errHeaders
 	}
+	stampClaudeOAuthHeaders(httpReq, oauthMimicryFP, body, false)
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
 		authID = auth.ID
@@ -820,6 +846,9 @@ func (e *ClaudeExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (
 	auth.Metadata["email"] = td.Email
 	auth.Metadata["expired"] = td.Expire
 	auth.Metadata["type"] = "claude"
+	if td.AccountUUID != "" {
+		auth.Metadata["account_uuid"] = td.AccountUUID
+	}
 	now := time.Now().Format(time.RFC3339)
 	auth.Metadata["last_refresh"] = now
 	return auth, nil

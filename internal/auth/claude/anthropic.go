@@ -19,6 +19,10 @@ type ClaudeTokenData struct {
 	Email string `json:"email"`
 	// Expire is the timestamp of the token expire
 	Expire string `json:"expired"`
+	// AccountUUID is the Anthropic account UUID returned by the OAuth token endpoint.
+	// Persisted so executors can populate metadata.user_id.account_uuid when forwarding
+	// requests as the official Claude Code CLI.
+	AccountUUID string `json:"account_uuid,omitempty"`
 }
 
 // ClaudeAuthBundle aggregates authentication data after OAuth flow completion

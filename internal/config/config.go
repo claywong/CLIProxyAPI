@@ -144,6 +144,14 @@ type Config struct {
 	// the auth/OAuth token file). Default false preserves the per-client "auto" behavior.
 	DisableClaudeCloakMode bool `yaml:"disable-claude-cloak-mode" json:"disable-claude-cloak-mode"`
 
+	// ClaudeOAuthMimicry controls the account-pinned Claude Code CLI mimicry pipeline
+	// applied to Claude OAuth credentials. When enabled (default), every OAuth request
+	// is rewritten with a stable per-account fingerprint (device_id, User-Agent,
+	// X-Stainless-*), the metadata.user_id is rebuilt against that fingerprint, and
+	// client-supplied headers/anthropic-beta are replaced wholesale with the template
+	// values. Disabling it falls back to the legacy injectFakeUserID + EnsureHeader path.
+	ClaudeOAuthMimicry ClaudeOAuthMimicry `yaml:"claude-oauth-mimicry" json:"claude-oauth-mimicry"`
+
 	// OpenAICompatibility defines OpenAI API compatibility configurations for external providers.
 	OpenAICompatibility []OpenAICompatibility `yaml:"openai-compatibility" json:"openai-compatibility"`
 
@@ -264,6 +272,16 @@ type ClaudeHeaderDefaults struct {
 	Arch                   string `yaml:"arch" json:"arch"`
 	Timeout                string `yaml:"timeout" json:"timeout"`
 	StabilizeDeviceProfile *bool  `yaml:"stabilize-device-profile,omitempty" json:"stabilize-device-profile,omitempty"`
+}
+
+// ClaudeOAuthMimicry configures the account-pinned Claude Code CLI mimicry pipeline.
+// See top-level config field doc for behavioural details.
+type ClaudeOAuthMimicry struct {
+	// Enabled toggles the full pipeline. Default true.
+	Enabled *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	// FingerprintCacheTTL controls how long the per-account fingerprint stays
+	// cached in memory. Each cache hit refreshes the TTL. Default 168h (7 days).
+	FingerprintCacheTTL string `yaml:"fingerprint-cache-ttl,omitempty" json:"fingerprint-cache-ttl,omitempty"`
 }
 
 // CodexHeaderDefaults configures fallback header values injected into Codex
