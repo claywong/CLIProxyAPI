@@ -14,6 +14,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
+	"github.com/tidwall/gjson"
 )
 
 // defaultMimicryFingerprintTTL governs the in-memory fingerprint cache when
@@ -139,6 +140,15 @@ func logClaudeOAuthMimicryWire(ctx context.Context, url string, req *http.Reques
 		devicePrefix = devicePrefix[:8]
 	}
 
+	// Only the top-level metadata field is dumped — the rest of the body is the
+	// caller's payload and bloats logs without adding diagnostic value for the
+	// mimicry pipeline. Missing/empty metadata logs as "<absent>" so operators
+	// can still tell the rewrite ran on a payload without that field.
+	metadataRaw := "<absent>"
+	if md := gjson.GetBytes(body, "metadata"); md.Exists() {
+		metadataRaw = md.Raw
+	}
+
 	helps.LogWithRequestID(ctx).WithFields(log.Fields{
 		"component":        "claude_oauth_mimicry",
 		"method":           req.Method,
@@ -148,6 +158,6 @@ func logClaudeOAuthMimicryWire(ctx context.Context, url string, req *http.Reques
 		"device_id_prefix": devicePrefix,
 		"user_agent":       fp.UserAgent,
 		"body_bytes":       len(body),
-	}).Debugf("claude oauth mimicry wire dump:\nheaders:\n  %s\nbody:\n%s",
-		strings.Join(headerLines, "\n  "), string(body))
+	}).Debugf("claude oauth mimicry wire dump:\nheaders:\n  %s\nbody.metadata:\n%s",
+		strings.Join(headerLines, "\n  "), metadataRaw)
 }
