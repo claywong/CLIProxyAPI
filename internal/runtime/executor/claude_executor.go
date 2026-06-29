@@ -729,9 +729,18 @@ func (e *ClaudeExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Aut
 	body = sanitizeClaudeMessagesForClaudeUpstreamWithDebug(ctx, body, baseModel)
 	// Apply Claude OAuth identity mimicry to the request body (count_tokens does
 	// not sign the body, so ordering relative to signing is moot here).
+	// mimicryBody keeps the metadata-bearing payload so the session header can be
+	// synced from metadata.user_id; the wire body strips metadata below because
+	// the count_tokens endpoint rejects it ("metadata: Extra inputs are not permitted").
 	var oauthMimicryFP *helps.OAuthFingerprint
+	mimicryBody := body
 	if oauthToken {
 		body, oauthMimicryFP = rewriteClaudeOAuthBody(ctx, e.cfg, auth, apiKey, body)
+		mimicryBody = body
+		// The count_tokens endpoint does not accept the top-level metadata field,
+		// so drop it from the wire payload while keeping mimicryBody for the
+		// session-header sync below.
+		body, _ = sjson.DeleteBytes(body, "metadata")
 	}
 
 	url := fmt.Sprintf("%s/v1/messages/count_tokens?beta=true", baseURL)
@@ -742,8 +751,8 @@ func (e *ClaudeExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Aut
 	if errHeaders := applyClaudeHeaders(httpReq, auth, apiKey, false, extraBetas, e.cfg); errHeaders != nil {
 		return cliproxyexecutor.Response{}, errHeaders
 	}
-	stampClaudeOAuthHeaders(httpReq, oauthMimicryFP, body, false)
-	logClaudeOAuthMimicryWire(ctx, url, httpReq, body, oauthMimicryFP, false)
+	stampClaudeOAuthHeaders(httpReq, oauthMimicryFP, mimicryBody, false)
+	logClaudeOAuthMimicryWire(ctx, url, httpReq, mimicryBody, oauthMimicryFP, false)
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
 		authID = auth.ID
