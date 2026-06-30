@@ -1195,7 +1195,7 @@ func claudeCreds(a *cliproxyauth.Auth) (apiKey, baseURL string) {
 }
 
 func checkSystemInstructions(payload []byte) []byte {
-	return checkSystemInstructionsWithSigningMode(payload, false, false, false, "2.1.63", "", "")
+	return checkSystemInstructionsWithSigningMode(payload, false, false, false, "2.1.195", "", "")
 }
 
 func rebuildMidSystemMessagesToTopLevel(payload []byte) []byte {
@@ -1838,7 +1838,12 @@ const fingerprintSalt = "59cf53e54c78"
 
 // computeFingerprint computes the 3-char build fingerprint that Claude Code embeds in cc_version.
 // Algorithm: SHA256(salt + messageText[4] + messageText[7] + messageText[20] + version)[:3]
+// Known pins: real CLI computes with empty messageText at injection time, so the result is stable per version.
 func computeFingerprint(messageText, version string) string {
+	switch version {
+	case "2.1.195":
+		return "d80"
+	}
 	indices := [3]int{4, 7, 20}
 	runes := []rune(messageText)
 	var sb strings.Builder
@@ -1867,18 +1872,13 @@ func generateBillingHeader(payload []byte, experimentalCCHSigning bool, version,
 		workloadPart = fmt.Sprintf(" cc_workload=%s;", workload)
 	}
 
-	if experimentalCCHSigning {
-		return fmt.Sprintf("x-anthropic-billing-header: cc_version=%s.%s; cc_entrypoint=%s; cch=00000;%s", version, buildHash, entrypoint, workloadPart)
-	}
-
-	// Generate a deterministic cch hash from the payload content (system + messages + tools).
-	h := sha256.Sum256(payload)
-	cch := hex.EncodeToString(h[:])[:5]
-	return fmt.Sprintf("x-anthropic-billing-header: cc_version=%s.%s; cc_entrypoint=%s; cch=%s;%s", version, buildHash, entrypoint, cch, workloadPart)
+	// cch field removed: Claude Code CLI 2.1.195+ no longer emits it.
+	_ = experimentalCCHSigning
+	return fmt.Sprintf("x-anthropic-billing-header: cc_version=%s.%s; cc_entrypoint=%s;%s", version, buildHash, entrypoint, workloadPart)
 }
 
 func checkSystemInstructionsWithMode(payload []byte, strictMode bool) []byte {
-	return checkSystemInstructionsWithSigningMode(payload, strictMode, false, false, "2.1.63", "", "")
+	return checkSystemInstructionsWithSigningMode(payload, strictMode, false, false, "2.1.195", "", "")
 }
 
 // checkSystemInstructionsWithSigningMode injects Claude Code-style system blocks:
