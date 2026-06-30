@@ -1907,13 +1907,15 @@ func checkSystemInstructionsWithSigningMode(payload []byte, strictMode bool, exp
 		messageText = system.String()
 	}
 
-	// Skip if already injected
+	billingText := generateBillingHeader(payload, experimentalCCHSigning, version, messageText, entrypoint, workload)
+
+	// If already injected, overwrite system[0].text with our canonical value and return.
 	firstText := gjson.GetBytes(payload, "system.0.text").String()
 	if strings.HasPrefix(firstText, "x-anthropic-billing-header:") {
+		payload, _ = sjson.SetBytes(payload, "system.0.text", billingText)
 		return payload
 	}
 
-	billingText := generateBillingHeader(payload, experimentalCCHSigning, version, messageText, entrypoint, workload)
 	billingBlock := buildTextBlock(billingText, nil)
 
 	// Build system blocks matching real Claude Code structure.

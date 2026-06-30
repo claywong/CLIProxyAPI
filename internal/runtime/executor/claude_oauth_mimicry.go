@@ -166,6 +166,11 @@ func logClaudeOAuthMimicryWire(ctx context.Context, url string, req *http.Reques
 		metadataRaw = md.Raw
 	}
 
+	billingHeader := "<absent>"
+	if s0 := gjson.GetBytes(body, "system.0.text"); s0.Exists() {
+		billingHeader = s0.String()
+	}
+
 	helps.LogWithRequestID(ctx).WithFields(log.Fields{
 		"component":        "claude_oauth_mimicry",
 		"method":           req.Method,
@@ -175,6 +180,6 @@ func logClaudeOAuthMimicryWire(ctx context.Context, url string, req *http.Reques
 		"device_id_prefix": devicePrefix,
 		"user_agent":       fp.UserAgent,
 		"body_bytes":       len(body),
-	}).Debugf("claude oauth mimicry wire dump:\nheaders:\n  %s\nbody.metadata:\n%s",
-		strings.Join(headerLines, "\n  "), metadataRaw)
+	}).Debugf("claude oauth mimicry wire dump:\nheaders:\n  %s\nbody.metadata:\n%s\nsystem[0].text:\n%s",
+		strings.Join(headerLines, "\n  "), metadataRaw, billingHeader)
 }
